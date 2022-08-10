@@ -40,28 +40,28 @@ async def poll_integratsioon():
         resp = requests.post(url, data=post_data, headers={'Cookie': cookie})
         if resp.status_code != 200:
             await send('Got error code {resp.status_code}.')
-            continue
-        text = resp.text
-        if '<title>Sisenemine</title>' in text:
-            await send('Needs new cookie:\n' + BASE_URL)
-        elif re.search(r'alert[^"]*">No results', text):
-            await send('No results')
         else:
-            soup = BeautifulSoup(resp.text, 'html.parser')
-            table = soup.find('table', class_='table')
-            if not table:
-                await send('There are openings, but could not find the table.')
+            text = resp.text
+            if '<title>Sisenemine</title>' in text:
+                await send('Needs new cookie:\n' + BASE_URL)
+            elif re.search(r'alert[^"]*">No results', text):
+                await send('No results')
             else:
-                results = []
-                for tr in table.find_all('tr'):
-                    tds = tr.find_all('td')
-                    if len(tds) < 4:
-                        continue
-                    time = re.sub(r'\s+', ' ', tds[0].get_text()).strip()
-                    place = re.sub(r'\s+', ' ', tds[2].get_text()).strip()
-                    free = re.sub(r'\s+', ' ', tds[3].get_text()).strip()
-                    results.append(f'* {time} at {place}, free {free}')
-                await send('There are openings:\n\n' + '\n'.join(results))
+                soup = BeautifulSoup(resp.text, 'html.parser')
+                table = soup.find('table', class_='table')
+                if not table:
+                    await send('There are openings, but could not find the table.')
+                else:
+                    results = []
+                    for tr in table.find_all('tr'):
+                        tds = tr.find_all('td')
+                        if len(tds) < 4:
+                            continue
+                        time = re.sub(r'\s+', ' ', tds[0].get_text()).strip()
+                        place = re.sub(r'\s+', ' ', tds[2].get_text()).strip()
+                        free = re.sub(r'\s+', ' ', tds[3].get_text()).strip()
+                        results.append(f'* {time} at {place}, free {free}')
+                    await send('There are openings:\n\n' + '\n'.join(results))
         await asyncio.sleep(config.POLLING_INTERVAL)
 
 
@@ -79,6 +79,7 @@ async def handle_msg(message: types.Message):
         if text.startswith('Cookie'):
             text = text[6:].lstrip(':').strip()
         cookie = text
+        last_text = ''
         await message.answer('Saved new cookie.')
 
 
