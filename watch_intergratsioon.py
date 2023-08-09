@@ -44,7 +44,7 @@ async def poll_integratsioon():
             text = resp.text
             if '<title>Sisenemine</title>' in text:
                 await send('Needs new cookie:\n' + BASE_URL)
-            elif re.search(r'alert[^"]*">No results', text):
+            elif re.search(r'alert[^"]*">[^<]*[nN]o results', text):
                 await send('No results')
             else:
                 soup = BeautifulSoup(resp.text, 'html.parser')
