@@ -1,4 +1,4 @@
 bs4
-requests
+requests ~= 1.26.16
 aiogram
 aiosqlite
