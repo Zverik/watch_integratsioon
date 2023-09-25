@@ -102,43 +102,54 @@ async def poll_integratsioon():
         'serviceEventStartDateUntil': "",
     }
     while state.polling:
-        resp = requests.post(url, data=post_data, headers={'Cookie': state.cookie})
-        if resp.status_code != 200:
-            await send_admin('Got error code {resp.status_code}.')
+        if not state.cookie:
+            # No point in doing the requests if we don't have the cookie.
+            await send_admin('Needs new cookie:\n' + BASE_URL)
         else:
-            text = resp.text
-            if '<title>Sisenemine</title>' in text:
-                await send_admin('Needs new cookie:\n' + BASE_URL)
-            elif re.search(r'alert[^"]*">[^<]*[nN]o results', text):
-                for level in ALL_LEVELS:
-                    await send_update(level, [])
+            resp = requests.post(url, data=post_data, headers={'Cookie': state.cookie})
+            if resp.status_code != 200:
+                await send_admin('Got error code {resp.status_code}.')
             else:
-                soup = BeautifulSoup(resp.text, 'html.parser')
-                table = soup.find('table', class_='table')
-                if not table:
-                    await send_admin('There are openings, but could not find the table.')
-                else:
+                text = resp.text
+                if '<title>Sisenemine</title>' in text:
+                    state.cookie = ''
+                    await send_admin('Needs new cookie:\n' + BASE_URL)
+                elif re.search(r'alert[^"]*">[^<]*[nN]o results', text):
+                    # No results, clear all the tables.
                     if state.log_needed:
-                        logging.info(str(table))
-                        await send_admin(
-                            f'Printed to the log a table with {len(table.find_all("tr"))} rows')
+                        logging.info(text)
+                        await send_admin('Printed to the log the "no results" text')
                         state.log_needed = False
-                    courses = defaultdict(list)
-                    for tr in table.find_all('tr'):
-                        tds = tr.find_all('td')
-                        if len(tds) < 4:
-                            continue
-                        time = re.sub(r'\s+', ' ', tds[0].get_text()).strip()
-                        service = re.sub(r'\s+', ' ', tds[1].get_text()).strip()
-                        place = re.sub(r'\s+', ' ', tds[2].get_text()).strip()
-                        free = re.sub(r'\s+', ' ', tds[3].get_text()).strip()
-                        m = re.search(r'\s([ABC][12])', service)
-                        if not m:
-                            await send_admin(f'Cannot parse service for level: "{service}"')
-                        else:
-                            courses[m.group(1)].append(Course(time, place, free))
                     for level in ALL_LEVELS:
-                        await send_update(level, courses.get(level, []))
+                        await send_update(level, [])
+                else:
+                    # Got a table of results, parse it and find the options.
+                    soup = BeautifulSoup(resp.text, 'html.parser')
+                    table = soup.find('table', class_='table')
+                    if not table:
+                        await send_admin('There are openings, but could not find the table.')
+                    else:
+                        if state.log_needed:
+                            logging.info(str(table))
+                            await send_admin(
+                                f'Printed to the log a table with {len(table.find_all("tr"))} rows')
+                            state.log_needed = False
+                        courses = defaultdict(list)
+                        for tr in table.find_all('tr'):
+                            tds = tr.find_all('td')
+                            if len(tds) < 4:
+                                continue
+                            time = re.sub(r'\s+', ' ', tds[0].get_text()).strip()
+                            service = re.sub(r'\s+', ' ', tds[1].get_text()).strip()
+                            place = re.sub(r'\s+', ' ', tds[2].get_text()).strip()
+                            free = re.sub(r'\s+', ' ', tds[3].get_text()).strip()
+                            m = re.search(r'\s([ABC][12])', service)
+                            if not m:
+                                await send_admin(f'Cannot parse service for level: "{service}"')
+                            else:
+                                courses[m.group(1)].append(Course(time, place, free))
+                        for level in ALL_LEVELS:
+                            await send_update(level, courses.get(level, []))
         await asyncio.sleep(config.POLLING_INTERVAL)
 
 
