@@ -12,16 +12,12 @@ from typing import List, Dict
 from bs4 import BeautifulSoup
 
 
-cookie = ''
-last_text = ''
-polling = True
 bot = Bot(token=config.BOT_TOKEN)
 dp = Dispatcher(bot=bot)
 BASE_URL = 'https://iseteenindus.integratsioon.ee/'
 LEVEL_CB = CallbackData('level', 'level')
 ALL_LEVELS = ['A2', 'B1', 'B2', 'C1']
 HTML = types.ParseMode.HTML
-last_courses = {}
 
 
 class Course:
@@ -44,10 +40,22 @@ class Course:
         return f'Course("{self.time}", "{self.place}", "{self.free}")'
 
 
-async def send_update(level: str, courses: List[Course]):
-    global last_courses
+class State:
+    def __init__(self):
+        self.polling = True
+        self.log_needed = False
+        self.last_text = ''
+        self.cookie = ''
+        self.last_courses = {}
 
-    lc = last_courses.get(level, set())
+
+state = State()
+
+
+async def send_update(level: str, courses: List[Course]):
+    global state
+
+    lc = state.last_courses.get(level, set())
     if len(lc) == len(courses):
         equal = True
         for c in courses:
@@ -68,23 +76,23 @@ async def send_update(level: str, courses: List[Course]):
         if not lc:
             text = f'<a href="{BASE_URL}">Quick!</a> ' + text
 
-    last_courses[level] = set(courses)
+    state.last_courses[level] = set(courses)
     if text:
         for u in await db.get_users(level):
             await bot.send_message(u.user_id, text, parse_mode=HTML)
 
 
 async def send_admin(text: str):
-    global last_text
-    if text == last_text:
+    global state
+    if text == state.last_text:
         return
-    last_text = text
+    state.last_text = text
     await bot.send_message(config.ADMIN_ID, text)
 
 
 async def poll_integratsioon():
-    global polling, cookie
-    polling = True
+    global state
+    state.polling = True
     url = BASE_URL + 'service/search'
     post_data = {
         'serviceTypeCode': "Keelekursus",
@@ -93,8 +101,8 @@ async def poll_integratsioon():
         'serviceEventStartDateFrom': "",
         'serviceEventStartDateUntil': "",
     }
-    while polling:
-        resp = requests.post(url, data=post_data, headers={'Cookie': cookie})
+    while state.polling:
+        resp = requests.post(url, data=post_data, headers={'Cookie': state.cookie})
         if resp.status_code != 200:
             await send_admin('Got error code {resp.status_code}.')
         else:
@@ -110,6 +118,11 @@ async def poll_integratsioon():
                 if not table:
                     await send_admin('There are openings, but could not find the table.')
                 else:
+                    if state.log_needed:
+                        logging.info(str(table))
+                        await send_admin(
+                            f'Printed to the log a table with {len(table.find_all("tr"))} rows')
+                        state.log_needed = False
                     courses = defaultdict(list)
                     for tr in table.find_all('tr'):
                         tds = tr.find_all('td')
@@ -185,6 +198,13 @@ async def handle_level(query: types.CallbackQuery, callback_data: Dict[str, str]
         f'Watching for courses for language level {new_level or "any"}')
 
 
+@dp.message_handler(commands=['log'])
+async def print_log(message: types.Message):
+    global state
+    state.log_needed = True
+    await message.answer('Go check the logs on server with sudo journalctl -u integratsioon')
+
+
 @dp.message_handler()
 async def handle_msg(message: types.Message):
     if message.from_user.is_bot:
@@ -195,13 +215,13 @@ async def handle_msg(message: types.Message):
             await message.answer('Send /start to subscribe.')
         return
 
-    global cookie, last_text
+    global state
 
     text = message.text.strip()
     if 'JSESSIONID' in text:
         if text.startswith('Cookie'):
             text = text[6:].lstrip(':').strip()
-        cookie = text
+        state.cookie = text
         await message.answer('Saved new cookie.')
 
 
