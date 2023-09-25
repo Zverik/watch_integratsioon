@@ -223,6 +223,8 @@ async def handle_level(query: types.CallbackQuery, callback_data: Dict[str, str]
 
 @dp.message_handler(commands=['log'])
 async def print_log(message: types.Message):
+    if message.from_user.id != config.ADMIN_ID:
+        return
     global state
     state.log_needed = True
     await message.answer('Go check the logs on server with sudo journalctl -u integratsioon')
@@ -230,6 +232,8 @@ async def print_log(message: types.Message):
 
 @dp.message_handler(commands=['health'])
 async def check_health(message: types.Message):
+    if message.from_user.id != config.ADMIN_ID:
+        return
     try:
         text = query_integratsioon(type_code='Suhtluspraktika', municipality='')
         dcourses = query_integratsioon(text)
