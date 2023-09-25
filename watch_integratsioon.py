@@ -150,7 +150,7 @@ async def poll_integratsioon():
         else:
             try:
                 text = query_integratsioon()
-                courses = query_integratsioon(text)
+                courses = parse_website(text)
                 for level in ALL_LEVELS:
                     await send_update(level, courses.get(level, []))
                 if state.log_needed:
@@ -236,10 +236,10 @@ async def check_health(message: types.Message):
         return
     try:
         text = query_integratsioon(type_code='Suhtluspraktika', municipality='')
-        dcourses = query_integratsioon(text)
+        dcourses = parse_website(text)
         if not dcourses:
             text = query_integratsioon(type_code='', municipality='')
-            dcourses = query_integratsioon(text)
+            dcourses = parse_website(text)
         courses = sum(dcourses.values(), start=[])
         courses_str = '\n'.join(c.line for c in courses)
         resp = f'There are {len(courses)} openings:\n\n{courses_str or "nothing"}'
