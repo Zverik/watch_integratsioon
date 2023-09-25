@@ -90,66 +90,78 @@ async def send_admin(text: str):
     await bot.send_message(config.ADMIN_ID, text)
 
 
-async def poll_integratsioon():
+class ParseException(Exception):
+    pass
+
+
+def parse_website(text: str) -> dict:
+    if re.search(r'alert[^"]*">[^<]*[nN]o results', text):
+        return {}
+
+    soup = BeautifulSoup(text, 'html.parser')
+    table = soup.find('table', class_='table')
+    if not table:
+        raise ParseException('There are openings, but could not find the table.')
+
+    courses = defaultdict(list)
+    for tr in table.find_all('tr'):
+        tds = tr.find_all('td')
+        if len(tds) < 4:
+            continue
+        time = re.sub(r'\s+', ' ', tds[0].get_text()).strip()
+        service = re.sub(r'\s+', ' ', tds[1].get_text()).strip()
+        place = re.sub(r'\s+', ' ', tds[2].get_text()).strip()
+        free = re.sub(r'\s+', ' ', tds[3].get_text()).strip()
+        m = re.search(r'\s([ABC][12])', service)
+        if not m:
+            raise ParseException(f'Cannot parse service for level: "{service}"')
+        else:
+            courses[m.group(1)].append(Course(time, place, free))
+    return courses
+
+
+def query_integratsioon(type_code='Keelekursus', municipality=None) -> str:
     global state
-    state.polling = True
     url = BASE_URL + 'service/search'
     post_data = {
-        'serviceTypeCode': "Keelekursus",
+        'serviceTypeCode': type_code,
         'proficiencyLevelCode': '',
-        'municipalityCode': config.MUNICIPALITY,
+        'municipalityCode': config.MUNICIPALITY if municipality is None else municipality,
         'serviceEventStartDateFrom': "",
         'serviceEventStartDateUntil': "",
     }
+    resp = requests.post(url, data=post_data, headers={'Cookie': state.cookie})
+    if resp.status_code != 200:
+        raise ParseException('Got error code {resp.status_code}.')
+    text = resp.text
+    if '<title>Sisenemine</title>' in text:
+        state.cookie = ''
+        raise ParseException('Needs new cookie:\n' + BASE_URL)
+    return text
+
+
+async def poll_integratsioon():
+    global state
+    state.polling = True
     while state.polling:
         if not state.cookie:
             # No point in doing the requests if we don't have the cookie.
             await send_admin('Needs new cookie:\n' + BASE_URL)
         else:
-            resp = requests.post(url, data=post_data, headers={'Cookie': state.cookie})
-            if resp.status_code != 200:
-                await send_admin('Got error code {resp.status_code}.')
-            else:
-                text = resp.text
-                if '<title>Sisenemine</title>' in text:
-                    state.cookie = ''
-                    await send_admin('Needs new cookie:\n' + BASE_URL)
-                elif re.search(r'alert[^"]*">[^<]*[nN]o results', text):
-                    # No results, clear all the tables.
-                    if state.log_needed:
-                        logging.info(text)
-                        await send_admin('Printed to the log the "no results" text')
-                        state.log_needed = False
-                    for level in ALL_LEVELS:
-                        await send_update(level, [])
-                else:
-                    # Got a table of results, parse it and find the options.
-                    soup = BeautifulSoup(resp.text, 'html.parser')
-                    table = soup.find('table', class_='table')
-                    if not table:
-                        await send_admin('There are openings, but could not find the table.')
-                    else:
-                        if state.log_needed:
-                            logging.info(str(table))
-                            await send_admin(
-                                f'Printed to the log a table with {len(table.find_all("tr"))} rows')
-                            state.log_needed = False
-                        courses = defaultdict(list)
-                        for tr in table.find_all('tr'):
-                            tds = tr.find_all('td')
-                            if len(tds) < 4:
-                                continue
-                            time = re.sub(r'\s+', ' ', tds[0].get_text()).strip()
-                            service = re.sub(r'\s+', ' ', tds[1].get_text()).strip()
-                            place = re.sub(r'\s+', ' ', tds[2].get_text()).strip()
-                            free = re.sub(r'\s+', ' ', tds[3].get_text()).strip()
-                            m = re.search(r'\s([ABC][12])', service)
-                            if not m:
-                                await send_admin(f'Cannot parse service for level: "{service}"')
-                            else:
-                                courses[m.group(1)].append(Course(time, place, free))
-                        for level in ALL_LEVELS:
-                            await send_update(level, courses.get(level, []))
+            try:
+                text = query_integratsioon()
+                courses = query_integratsioon(text)
+                for level in ALL_LEVELS:
+                    await send_update(level, courses.get(level, []))
+                if state.log_needed:
+                    logging.info(text)
+                    courses_len = sum([len(c) for c in courses.values()])
+                    await send_admin(f'Check the log for {courses_len} openings!')
+                    state.log_needed = False
+            except ParseException as e:
+                await send_admin(str(e))
+            except Exception as e:
+                await send_admin(f'Exception happened: {e}')
         await asyncio.sleep(config.POLLING_INTERVAL)
 
 
@@ -214,6 +226,24 @@ async def print_log(message: types.Message):
     global state
     state.log_needed = True
     await message.answer('Go check the logs on server with sudo journalctl -u integratsioon')
+
+
+@dp.message_handler(commands=['health'])
+async def check_health(message: types.Message):
+    try:
+        text = query_integratsioon(type_code='Suhtluspraktika', municipality='')
+        dcourses = query_integratsioon(text)
+        if not dcourses:
+            text = query_integratsioon(type_code='', municipality='')
+            dcourses = query_integratsioon(text)
+        courses = sum(dcourses.values(), start=[])
+        courses_str = '\n'.join(c.line for c in courses)
+        resp = f'There are {len(courses)} openings:\n\n{courses_str or "nothing"}'
+        await message.answer(resp)
+    except ParseException as e:
+        await send_admin(str(e))
+    except Exception as e:
+        await send_admin(f'Exception happened: {e}')
 
 
 @dp.message_handler()
