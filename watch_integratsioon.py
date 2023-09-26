@@ -101,6 +101,7 @@ def parse_website(text: str) -> dict:
     soup = BeautifulSoup(text, 'html.parser')
     table = soup.find('table', class_='table')
     if not table:
+        logging.warning('Could not find the openings table: %s', str(soup))
         raise ParseException('There are openings, but could not find the table.')
 
     courses = defaultdict(list)
