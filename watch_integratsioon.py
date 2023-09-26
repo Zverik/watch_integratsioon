@@ -95,7 +95,7 @@ class ParseException(Exception):
 
 
 def parse_website(text: str) -> dict:
-    if re.search(r'alert[^"]*">[^<]*[nN]o results', text):
+    if re.search(r'alert[^"]*">[^<]*([nN]o results|поскольку свободных мест)', text):
         return {}
 
     soup = BeautifulSoup(text, 'html.parser')
