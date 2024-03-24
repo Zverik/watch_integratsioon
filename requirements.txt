@@ -1,5 +1,5 @@
 bs4
 requests
 urllib3 ~= 1.26.16
-aiogram
+aiogram ~= 2.25.2
 aiosqlite
